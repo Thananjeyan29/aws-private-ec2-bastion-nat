@@ -1,0 +1,25 @@
+# SSH into Bastion Host
+ssh -i bastionkey.pem ec2-user@<bastion-public-ip>
+
+# SSH from Bastion to Private EC2
+ssh -i bastionkey.pem ec2-user@10.0.2.142
+
+# Install Apache (Amazon Linux 2023)
+sudo dnf install httpd -y
+sudo systemctl start httpd
+sudo systemctl enable httpd
+sudo systemctl status httpd
+
+# Install Git
+sudo dnf install git -y
+
+# Clone GitHub portfolio
+cd /tmp
+git clone https://github.com/Thananjeyan29/thananjeyan29.github.io.git
+
+# Deploy website to Apache
+sudo rm -rf /var/www/html/*
+sudo cp -r thananjeyan29.github.io/* /var/www/html/
+
+# Verify website
+curl http://localhost

@@ -1,0 +1,234 @@
+# Project: Private EC2 Web Hosting using Bastion Host and NAT Gateway
+# Author: Thananjeyan (TJ)
+# Description:
+# - Public Bastion Host
+# - Private EC2 without public IP
+# - NAT Gateway for outbound internet
+# - Apache + GitHub website hosting
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Step-by-step Private EC2 with Bastion Host and NAT Gateway for Internet Access
+
+Parameters:
+  KeyName:
+    Description: EC2 Key Pair Name
+    Type: AWS::EC2::KeyPair::KeyName
+
+Resources:
+
+  ################################
+  # Step 1: Create VPC
+  ################################
+  MyVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: My-own-VPC
+
+  ################################
+  # Step 2: Create Internet Gateway
+  ################################
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: My-own-IGW
+
+  ################################
+  # Step 3: Attach IGW to VPC
+  ################################
+  AttachIGW:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref MyVPC
+      InternetGatewayId: !Ref InternetGateway
+
+  ################################
+  # Step 4: Create Public Subnet
+  ################################
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: My-own-Public-Subnet
+
+  ################################
+  # Step 5: Create Private Subnet
+  ################################
+  PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: 10.0.2.0/24
+      MapPublicIpOnLaunch: false
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: My-own-Private-Subnet
+
+  ################################
+  # Step 6: Create Public Route Table
+  ################################
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags:
+        - Key: Name
+          Value: My-own-Public-RT
+
+  ################################
+  # Step 7: Public Route + Association
+  ################################
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachIGW
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  ################################
+  # Step 8: Create Private Route Table
+  ################################
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags:
+        - Key: Name
+          Value: My-own-Private-RT
+
+  ################################
+  # Step 9: Associate Private Subnet
+  ################################
+  PrivateSubnetAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet
+      RouteTableId: !Ref PrivateRouteTable
+
+  ################################
+  # Step 10: Bastion Security Group
+  ################################
+  BastionSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow SSH, HTTP, HTTPS from Internet
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: My-own-Public-EC2-SG
+
+  ################################
+  # Step 11: Private EC2 Security Group
+  ################################
+  PrivateEC2SG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow access only from Bastion
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          SourceSecurityGroupId: !Ref BastionSG
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref BastionSG
+      Tags:
+        - Key: Name
+          Value: My-own-Private-EC2-SG
+
+  ################################
+  # Step 12: Launch Bastion EC2
+  ################################
+  BastionEC2:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.micro
+      KeyName: !Ref KeyName
+      ImageId: ami-0317b0f0a0144b137
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds:
+        - !Ref BastionSG
+      Tags:
+        - Key: Name
+          Value: My-own-Bastion-EC2
+
+  ################################
+  # Step 13 & 14: Private EC2
+  ################################
+  PrivateEC2:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.micro
+      KeyName: !Ref KeyName
+      ImageId: ami-0317b0f0a0144b137
+      SubnetId: !Ref PrivateSubnet
+      SecurityGroupIds:
+        - !Ref PrivateEC2SG
+      Tags:
+        - Key: Name
+          Value: My-own-Private-Web-EC2
+
+  ################################
+  # Step 15: Create Elastic IP for NAT
+  ################################
+  NatEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  ################################
+  # Step 16: Create NAT Gateway
+  ################################
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatEIP.AllocationId
+      SubnetId: !Ref PublicSubnet
+
+  ################################
+  # Step 17: Update Private Route
+  ################################
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+Outputs:
+  BastionPublicIP:
+    Description: Bastion Host Public IP
+    Value: !GetAtt BastionEC2.PublicIp

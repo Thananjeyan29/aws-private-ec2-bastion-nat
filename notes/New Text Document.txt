@@ -1,0 +1,6 @@
+- Learned how to use Bastion Host securely
+- Understood why private EC2 should not have public IP
+- Implemented NAT Gateway for outbound internet
+- Hosted website inside private subnet
+- Cost awareness: All AWS resources were terminated after testing to avoid charges.
+
